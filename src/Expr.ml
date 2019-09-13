@@ -36,12 +36,17 @@ let update x v s = fun y -> if x = y then v else s y
 let s = update "x" 1 @@ update "y" 2 @@ update "z" 3 @@ update "t" 4 empty
 
 (* Some testing; comment this definition out when submitting the solution. *)
-let _ =
+(*let _ =
   List.iter
     (fun x ->
        try  Printf.printf "%s=%d\n" x @@ s x
        with Failure s -> Printf.printf "%s\n" s
     ) ["x"; "a"; "y"; "z"; "t"; "b"]
+*)
+
+let int_to_bool x = x != 0
+
+let bool_to_int x = if x then 1 else 0
 
 (* Expression evaluator
 
@@ -50,5 +55,23 @@ let _ =
    Takes a state and an expression, and returns the value of the expression in 
    the given state.
 *)
-let eval = failwith "Not implemented yet"
-                    
+let rec eval s e = match e with
+  | Const c          -> c
+  | Var v            -> s v
+  | Binop (op, l, r) -> 
+    let (lv, rv) = (eval s l, eval s r) in 
+      match op with
+      | "+"  -> lv + rv
+      | "-"  -> lv - rv
+      | "*"  -> lv * rv
+      | "/"  -> lv / rv
+      | "%"  -> lv mod rv
+      | "<"  -> bool_to_int (lv < rv)
+      | "<=" -> bool_to_int (lv <= rv)
+      | ">"  -> bool_to_int (lv > rv)
+      | ">=" -> bool_to_int (lv >= rv)
+      | "==" -> bool_to_int (lv == rv)
+      | "!=" -> bool_to_int (lv <> rv)
+      | "&&" -> bool_to_int ((int_to_bool lv) && (int_to_bool rv))
+      | "!!" -> bool_to_int ((int_to_bool lv) || (int_to_bool rv))
+      |  _   -> failwith (Printf.sprintf "Unknown operator %s" op)
