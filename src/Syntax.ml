@@ -34,6 +34,10 @@ module Expr =
     *)
     let update x v s = fun y -> if x = y then v else s y
 
+    let int_to_bool x = x != 0
+
+    let bool_to_int x = if x then 1 else 0
+
     (* Expression evaluator
 
           val eval : state -> t -> int
@@ -41,11 +45,29 @@ module Expr =
        Takes a state and an expression, and returns the value of the expression in 
        the given state.
     *)
-    let eval _ = failwith "Not implemented yet"
+    let rec eval state e = match e with
+    | Const c          -> c
+    | Var v            -> state v
+    | Binop (op, l, r) -> 
+      let (lv, rv) = (eval state l, eval state r) in 
+        match op with
+        | "+"  -> lv + rv
+        | "-"  -> lv - rv
+        | "*"  -> lv * rv
+        | "/"  -> lv / rv
+        | "%"  -> lv mod rv
+        | "<"  -> bool_to_int (lv < rv)
+        | "<=" -> bool_to_int (lv <= rv)
+        | ">"  -> bool_to_int (lv > rv)
+        | ">=" -> bool_to_int (lv >= rv)
+        | "==" -> bool_to_int (lv == rv)
+        | "!=" -> bool_to_int (lv <> rv)
+        | "&&" -> bool_to_int ((int_to_bool lv) && (int_to_bool rv))
+        | "!!" -> bool_to_int ((int_to_bool lv) || (int_to_bool rv))
 
   end
                     
-(* Simple statements: syntax and sematics *)
+(* Simple statements: syntax and semantics *)
 module Stmt =
   struct
 
@@ -65,8 +87,12 @@ module Stmt =
 
        Takes a configuration and a statement, and returns another configuration
     *)
-    let eval _ = failwith "Not implemented yet"
-                                                         
+    let rec eval config t = match t, config with
+      | Read x, (s, z::i, o)     -> (Expr.update x z s, i, o)
+      | Write e, (s, i, o)       -> (s, i, o @ [Expr.eval s e])
+      | Assign (x, e), (s, i, o) -> (Expr.update x (Expr.eval s e) s, i, o)
+      | Seq (s1, s2), (s, i, o)  -> eval (eval (s, i, o) s1) s2
+                                      
   end
 
 (* The top-level definitions *)
