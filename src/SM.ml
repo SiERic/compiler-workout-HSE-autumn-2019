@@ -24,7 +24,15 @@ type config = int list * Stmt.config
 
    Takes a configuration and a program, and returns a configuration as a result
 *)                         
-let rec eval conf prog = failwith "Not yet implemented"
+let rec eval config prg = match prg with
+  | []      -> config
+  | (p::ps) -> match p, config with 
+    | BINOP op, (y::x::st, (s, i, o)) -> eval ((Language.Expr.eval s (Binop (op, Const x, Const y)))::st, (s, i, o)) ps
+    | CONST z,  (st, c)               -> eval (z::st, c) ps
+    | READ,     (st, (s, z::i, o))    -> eval (z::st, (s, i, o)) ps
+    | WRITE,    (z::st, (s, i, o))    -> eval (st, (s, i, o @ [z])) ps
+    | ST x,     (z::st, (s, i, o))    -> eval (st, ((Language.Expr.update x z s), i, o)) ps
+    | LD x,     (st, (s, i, o))       -> eval ((s x)::st, (s, i, o)) ps
 
 (* Top-level evaluation
 
