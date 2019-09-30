@@ -73,6 +73,18 @@ let show instr =
 (* Opening stack machine to use instructions without fully qualified names *)
 open SM
 
+let is_register op = match op with
+  | R _       -> true
+  | otherwise -> false
+
+let get_suffix op = match op with
+  | "==" -> "e"
+  | "!=" -> "ne"
+  | "<=" -> "le"
+  | "<"  -> "l"
+  | ">=" -> "ge"
+  | ">"  -> "g"
+
 (* Symbolic stack machine evaluator
 
      compile : env -> prg -> env * instr list
@@ -80,7 +92,38 @@ open SM
    Take an environment, a stack machine program, and returns a pair --- the updated environment and the list
    of x86 instructions
 *)
-let compile _ _ = failwith "Not yet implemented"
+let rec compile env prg = match prg with
+  | []      -> (env, [])
+  | (p::ps) -> 
+    let env, instr =
+      match p with 
+        | BINOP op -> let y, x, env = env#pop2 
+            in let _, env = env#allocate 
+              in env, (match op with
+                | "+"| "-"| "*" -> [Mov (x, eax); Binop (op, y, eax); Mov (eax, x)]
+                | "/"           -> [Mov (x, eax); Cltd; IDiv y; Mov (eax, x)]
+                | "%"           -> [Mov (x, eax); Cltd; IDiv y; Mov (edx, x)]
+                | "!!" | "&&"   -> [Mov (x, eax); Binop (op, y, eax); Mov (eax, x)]
+                | "==" | "!=" | "<=" | "<" | ">=" | ">" -> 
+                    [Mov (x, eax); Binop ("cmp", y, eax); Mov (L 0, edx); Set (get_suffix op, "%dl"); Mov (edx, x)]
+                ) 
+
+        | CONST z  -> let s, env = env#allocate 
+            in env, [Mov (L z, s)]
+        | LD x     -> let s, env = (env#global x)#allocate 
+            in env, 
+              (if is_register s 
+               then [Mov (M (env#loc x), s)]
+               else [Mov (M (env#loc x), eax); Mov (eax, s)]
+              )
+        | ST x     -> let s, env = (env#global x)#pop
+            in env, [Mov (s, M (env#loc x))]
+        | READ     -> let s, env = (env#allocate)
+            in env, [Call "Lread"; Mov (eax, s)]
+        | WRITE    -> let s, env = (env#pop)
+            in env, [Push s; Call "Lwrite"; Pop eax]
+    in let (env, instrs) = compile env ps 
+      in (env, instr @ instrs) 
 
 (* A set of strings *)           
 module S = Set.Make (String)
@@ -139,7 +182,7 @@ let compile_unit env scode =
   )
 
 (* Generates an assembler text for a program: first compiles the program into
-   the stack code, then generates x86 assember code, then prints the assembler file
+   the stack code, then generates x86 assembler code, then prints the assembler file
 *)
 let genasm prog =
   let env, code = compile_unit (new env) (SM.compile prog) in
