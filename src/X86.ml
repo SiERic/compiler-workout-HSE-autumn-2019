@@ -91,6 +91,9 @@ let get_suffix op = match op with
   | ">=" -> "ge"
   | ">"  -> "g"
 
+let to_bool x = [Mov (x, eax); Binop ("cmp", L 0, eax); Mov (L 0, eax); Set ("ne", "%al"); 
+                Binop ("&&", L 1, eax); Mov (eax, x);]
+
 (* Symbolic stack machine evaluator
 
      compile : env -> prg -> env * instr list
@@ -109,7 +112,7 @@ let rec compile env prg = match prg with
                 | "+"| "-"| "*" -> [Mov (x, eax); Binop (op, y, eax); Mov (eax, x)]
                 | "/"           -> [Mov (x, eax); Cltd; IDiv y; Mov (eax, x)]
                 | "%"           -> [Mov (x, eax); Cltd; IDiv y; Mov (edx, x)]
-                | "!!" | "&&"   -> [Mov (x, eax); Binop (op, y, eax); Mov (eax, x)]
+                | "!!" | "&&"   -> to_bool x @ to_bool y @ [Mov (x, eax); Binop (op, y, eax); Mov (eax, x)]
                 | "==" | "!=" | "<=" | "<" | ">=" | ">" -> 
                     [Mov (x, eax); Binop ("cmp", y, eax); Mov (L 0, edx); Set (get_suffix op, "%dl"); Mov (edx, x)]
               ) 
