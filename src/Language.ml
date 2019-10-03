@@ -116,7 +116,6 @@ module Stmt =
     (* empty statement                  *) | Skip
     (* conditional                      *) | If     of Expr.t * t * t
     (* loop with a pre-condition        *) | While  of Expr.t * t
-    (* loop with a post-condition       *) (* add yourself *)  with show
                                                                     
     (* The type of configuration: a state, an input stream, an output stream *)
     type config = Expr.state * int list * int list 
@@ -128,23 +127,45 @@ module Stmt =
        Takes a configuration and a statement, and returns another configuration
     *)
     let rec eval config t = match t, config with
-      | Read x, (s, z::i, o)     -> (Expr.update x z s, i, o)
-      | Write e, (s, i, o)       -> (s, i, o @ [Expr.eval s e])
-      | Assign (x, e), (s, i, o) -> (Expr.update x (Expr.eval s e) s, i, o)
-      | Seq (s1, s2), (s, i, o)  -> eval (eval (s, i, o) s1) s2
+      | Read x, (s, z::i, o)       -> (Expr.update x z s, i, o)
+      | Write e, (s, i, o)         -> (s, i, o @ [Expr.eval s e])
+      | Assign (x, e), (s, i, o)   -> (Expr.update x (Expr.eval s e) s, i, o)
+      | Seq (s1, s2), (s, i, o)    -> eval (eval (s, i, o) s1) s2
+      | Skip, (s, i, o)            -> (s, i, o)
+      | If (e, s1, s2), (s, i, o)  -> if (Expr.int_to_bool (Expr.eval s e) == true)
+                                      then eval (s, i, o) s1
+                                      else eval (s, i, o) s2
+      | While (e, st), (s, i, o)   -> if (Expr.int_to_bool (Expr.eval s e) == true)
+                                      then eval (s, i, o) (Seq (st, While (e, st)))
+                                      else eval (s, i, o) Skip
+
+    let negate e = Expr.Binop ("-", Expr.Const 1, e)
                                
     (* Statement parser *)
     ostap (
       expr: !(Expr.expr);
 
-      read:   "read" "(" x:IDENT ")" {Read x};
-      write:  "write" "(" e:expr ")" {Write e};
-      assign: x:IDENT ":=" e:expr    {Assign (x, e)};
-      stmt: assign | read | write ;
+      read:    "read" "(" x:IDENT ")"                   {Read x};
+      write:   "write" "(" e:expr ")"                   {Write e};
+      assign:  x:IDENT ":=" e:expr                      {Assign (x, e)};
+      skip:    "skip"                                   {Skip};
+      if_stmt: "if" e:expr "then" s1:stmt s2:else_stmt  {If (e, s1, s2)};
 
-      parse: <x::xs> :!(Util.listBy)[ostap (";")][stmt] {List.fold_left (fun s1 s2 -> Seq (s1, s2)) x xs}
-    )
-      
+      else_stmt: 
+          "fi"                                          {Skip}
+        | "else" s2:stmt "fi"                           {s2}
+        | "elif" e:expr "then" s1:stmt s2:else_stmt     {If (e, s1, s2)};
+
+      while_stmt:  "while" e:expr "do" s:stmt "od"      {While (e, s)};
+      repeat_stmt: "repeat" s:stmt "until" e:expr       {Seq (s, While (negate e, s))};
+      for_stmt:    "for" s1:stmt "," e:expr "," s2:stmt "do" s3:stmt "od"
+                                                        {Seq (s1, While (e, Seq (s3, s2)))};
+
+      simple_stmt: assign | read | write | skip | if_stmt | while_stmt | repeat_stmt | for_stmt;
+
+      stmt: <x::xs> :!(Util.listBy)[ostap (";")][simple_stmt] {List.fold_left (fun s1 s2 -> Seq (s1, s2)) x xs};
+      parse: stmt
+    ) 
   end
 
 (* The top-level definitions *)

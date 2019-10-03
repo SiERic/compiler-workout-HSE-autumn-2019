@@ -103,31 +103,38 @@ let rec compile env prg = match prg with
   | (p::ps) -> 
     let env, instr =
       match p with 
-        | BINOP op -> let y, x, env = env#pop2 
-            in let _, env = env#allocate 
-              in env, (match op with
+        | BINOP op    -> let y, x, env = env#pop2 in
+            let _, env = env#allocate in
+              env, (match op with
                 | "+"| "-"| "*" -> [Mov (x, eax); Binop (op, y, eax); Mov (eax, x)]
                 | "/"           -> [Mov (x, eax); Cltd; IDiv y; Mov (eax, x)]
                 | "%"           -> [Mov (x, eax); Cltd; IDiv y; Mov (edx, x)]
                 | "!!" | "&&"   -> [Mov (x, eax); Binop (op, y, eax); Mov (eax, x)]
                 | "==" | "!=" | "<=" | "<" | ">=" | ">" -> 
                     [Mov (x, eax); Binop ("cmp", y, eax); Mov (L 0, edx); Set (get_suffix op, "%dl"); Mov (edx, x)]
-                ) 
-
-        | CONST z  -> let s, env = env#allocate 
-            in env, [Mov (L z, s)]
-        | LD x     -> let s, env = (env#global x)#allocate 
-            in env, 
-              (if is_register s 
-               then [Mov (M (env#loc x), s)]
-               else [Mov (M (env#loc x), eax); Mov (eax, s)]
-              )
-        | ST x     -> let s, env = (env#global x)#pop
-            in env, [Mov (s, M (env#loc x))]
-        | READ     -> let s, env = (env#allocate)
-            in env, [Call "Lread"; Mov (eax, s)]
-        | WRITE    -> let s, env = (env#pop)
-            in env, [Push s; Call "Lwrite"; Pop eax]
+              ) 
+        | CONST z     -> let s, env = env#allocate in
+            env, [Mov (L z, s)]
+        | READ        -> let s, env = (env#allocate) in
+            env, [Call "Lread"; Mov (eax, s)]
+        | WRITE       -> let s, env = (env#pop) in
+            env, [Push s; Call "Lwrite"; Pop eax]
+        | LD x        -> let s, env = (env#global x)#allocate in
+            env, 
+            (if is_register s 
+             then [Mov (M (env#loc x), s)]
+             else [Mov (M (env#loc x), eax); Mov (eax, s)]
+            )
+        | ST x        -> let s, env = (env#global x)#pop in
+            env, 
+            (if is_register s
+             then [Mov (s, M (env#loc x))]
+             else [Mov(s, eax); Mov (eax, M (env#loc x))] 
+            )
+        | LABEL l     -> env, [Label l]
+        | JMP l       -> env, [Jmp l]
+        | CJMP (x, l) -> let s, env = env#pop 
+          in env, [Binop ("cmp", L 0, s); CJmp (x, l)]
     in let (env, instrs) = compile env ps 
       in (env, instr @ instrs) 
 
@@ -151,7 +158,7 @@ class env =
 	| []                            -> ebx     , 0
 	| (S n)::_                      -> S (n+1) , n+1
 	| (R n)::_ when n < num_of_regs -> R (n+1) , stack_slots
-        | (M _)::s                      -> allocate' s
+  | (M _)::s                      -> allocate' s
 	| _                             -> S 0     , 1
 	in
 	allocate' stack
