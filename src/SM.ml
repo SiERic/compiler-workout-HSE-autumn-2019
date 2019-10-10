@@ -92,26 +92,26 @@ let rec compile_expr e = match e with
   | Expr.Var x              -> [LD x]
   | Expr.Binop (op, e1, e2) -> compile_expr e1 @ compile_expr e2 @ [BINOP op]
 
-let rec compile_stmt t = match t with 
+let rec compile_stmt t l_end = match t with 
   | Stmt.Read x            -> [READ] @ [ST x]
   | Stmt.Write e           -> compile_expr e @ [WRITE]
   | Stmt.Assign (x, e)     -> compile_expr e @ [ST x]
-  | Stmt.Seq (s1, s2)      -> compile_stmt s1 @ compile_stmt s2
+  | Stmt.Seq (s1, s2)      -> compile_stmt s1 "" @ compile_stmt s2 l_end
   | Stmt.Skip              -> []
   | Stmt.If (e, s1, s2)    -> let l_else = label_generator#get_label in
-                              let l_quit = label_generator#get_label in             
-                                compile_expr e @ [CJMP ("z", l_else)] @ compile_stmt s1 @ 
-                                [JMP l_quit]   @ [LABEL l_else]       @ compile_stmt s2 @ [LABEL l_quit]
+                              let l_quit = (if l_end = "" then label_generator#get_label else l_end) in             
+                                compile_expr e @ [CJMP ("z", l_else)] @ compile_stmt s1 l_quit @ 
+                                [JMP l_quit]   @ [LABEL l_else]       @ compile_stmt s2 l_quit @ (if l_end = "" then [LABEL l_quit] else [])
   | Stmt.While (e, s)      -> let l_start = label_generator#get_label in
                               let l_quit  = label_generator#get_label in
                                 [LABEL l_start] @ compile_expr e @ [CJMP ("z", l_quit)] @ 
-                                compile_stmt s  @ [JMP l_start]  @ [LABEL l_quit]
+                                compile_stmt s ""  @ [JMP l_start]  @ [LABEL l_quit]
   | Stmt.Call (name, args) -> List.concat (List.map compile_expr args) @ [CALL name]
 
 let rec compile (ds, main) = let rec compile_defs ds = match ds with
                               | []      -> []
                               | (d::ds) -> let (name, (args, locals, body)) = d 
-                                           in [LABEL name] @ [BEGIN (args, locals)] @ compile_stmt body @ [END] @ compile_defs ds
+                                           in [LABEL name] @ [BEGIN (args, locals)] @ compile_stmt body "" @ [END] @ compile_defs ds
                              in let l_main = label_generator#get_label
-                             in [JMP l_main] @ compile_defs ds @ [LABEL l_main] @ compile_stmt main @ [END] 
+                             in [JMP l_main] @ compile_defs ds @ [LABEL l_main] @ compile_stmt main "" @ [END] 
 
