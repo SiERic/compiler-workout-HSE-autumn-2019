@@ -78,6 +78,10 @@ module Expr =
     let bti   = function true -> 1 | _ -> 0
     let itb b = b <> 0
 
+    let get x = match x with
+      | Some x -> x
+      | _ -> 0
+
     let to_func op =
       let (|>) f g   = fun x y -> f (g x y) in
       match op with
@@ -102,9 +106,9 @@ module Expr =
       | Var   x           -> (st, i, o, Some (State.eval st x))
       | Binop (op, x, y)  -> let (st', i', o', r') = eval env (st, i, o, r) x in
                              let (st'', i'', o'', r'') = eval env (st', i', o', r') y in
-                             (st'', i'', o'', Some (to_func op (Option.get r') (Option.get r'')))
+                             (st'', i'', o'', Some (to_func op (get r') (get r'')))
       | Call (name, exprs) -> let eval_expr = (fun expr (args, conf) ->
-                                               let (st', i', o', r') = eval env conf expr in ((Option.get r')::args, (st', i', o', r'))) in
+                                               let (st', i', o', r') = eval env conf expr in ((get r')::args, (st', i', o', r'))) in
                               let args, conf = List.fold_right eval_expr exprs ([], conf) in
                               env#definition env name args conf 
          
@@ -167,18 +171,18 @@ module Stmt =
       match stmt with
         | Skip              -> if (k == Skip) then conf else eval env conf Skip k
         | Assign (x, e)     -> let (st', i', o', r') = Expr.eval env conf e in
-                               eval env (State.update x (Option.get r') st', i', o', None) Skip k
+                               eval env (State.update x (Expr.get r') st', i', o', None) Skip k
         | Write e           -> let (st', i', o', r') = Expr.eval env conf e in 
-                               eval env (st', i', o' @ [Option.get r'], None) Skip k
+                               eval env (st', i', o' @ [Expr.get r'], None) Skip k
         | Read x            -> let (z::i) = i in 
                                eval env (State.update x z st, i, o, None) Skip k
         | Seq (s1, s2)      -> eval env (st, i, o, r) (s2 ^ k) s1
         | If (e, s1, s2)    -> let (st', i', o', r') = Expr.eval env conf e in 
-                               if (Expr.itb (Option.get r'))
+                               if (Expr.itb (Expr.get r'))
                                then eval env (st', i', o', None) k s1
                                else eval env (st', i', o', None) k s2
         | While (e, s)      -> let (st', i', o', r') = Expr.eval env conf e in
-                               if (Expr.itb (Option.get r'))
+                               if (Expr.itb (Expr.get r'))
                                then eval env (st', i', o', None) ((While (e, s)) ^ k) s 
                                else eval env (st', i', o', None) Skip k
         | Call (name, args) -> eval env (Expr.eval env conf (Expr.Call (name, args))) Skip k
