@@ -212,9 +212,10 @@ module Stmt =
                                                         {Seq (s1, While (e, Seq (s3, s2)))};
 
       call: name:IDENT "(" args:!(Util.list0By)[ostap (",")][Expr.parse] ")" { Call (name, args) };
-      return: "return" e:expr? {Return e};
+      return_some: "return" e:expr {Return Some e};
+      return_none: "return"        {Return None};
 
-      simple_stmt: assign | read | write | skip | if_stmt | while_stmt | repeat_stmt | for_stmt | call | return;
+      simple_stmt: assign | read | write | skip | if_stmt | while_stmt | repeat_stmt | for_stmt | call | return_some | return_none;
 
       stmt: <x::xs> :!(Util.listBy)[ostap (";")][simple_stmt] {List.fold_left (fun s1 s2 -> Seq (s1, s2)) x xs};
       parse: stmt
