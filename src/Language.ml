@@ -136,8 +136,8 @@ module Expr =
       
       primary:
         n:DECIMAL {Const n}
-      | x:IDENT   {Var x}
       | name:IDENT "(" args:!(Util.list0By)[ostap (",")][parse] ")" {Call (name, args)} 
+      | x:IDENT   {Var x}
       | -"(" parse -")"
     )
     
