@@ -83,6 +83,21 @@ let show instr =
 (* Opening stack machine to use instructions without fully qualified names *)
 open SM
 
+let is_register op = match op with
+  | R _       -> true
+  | otherwise -> false
+
+let get_suffix op = match op with
+  | "==" -> "e"
+  | "!=" -> "ne"
+  | "<=" -> "le"
+  | "<"  -> "l"
+  | ">=" -> "ge"
+  | ">"  -> "g"
+
+let to_bool x = [Mov (x, eax); Binop ("cmp", L 0, eax); Mov (L 0, eax); Set ("ne", "%al"); 
+                Binop ("&&", L 1, eax); Mov (eax, x);]
+
 (* Symbolic stack machine evaluator
 
      compile : env -> prg -> env * instr list
@@ -90,7 +105,67 @@ open SM
    Take an environment, a stack machine program, and returns a pair --- the updated environment and the list
    of x86 instructions
 *)
-let compile env code = failwith "Not implemented"
+let rec compile env code = match code with
+  | []      -> env, []
+  | (p::ps) -> 
+    let env, instr =
+      (match p with 
+        | BINOP op    -> let y, x, env = env#pop2 in
+            let _, env = env#allocate in
+              env, (match op with
+                | "+"| "-"| "*" -> [Mov (x, eax); Binop (op, y, eax); Mov (eax, x)]
+                | "/"           -> [Mov (x, eax); Cltd; IDiv y; Mov (eax, x)]
+                | "%"           -> [Mov (x, eax); Cltd; IDiv y; Mov (edx, x)]
+                | "!!" | "&&"   -> to_bool x @ to_bool y @ [Mov (x, eax); Binop (op, y, eax); Mov (eax, x)]
+                | "==" | "!=" | "<=" | "<" | ">=" | ">" -> 
+                    [Mov (x, eax); Binop ("cmp", y, eax); Mov (L 0, edx); Set (get_suffix op, "%dl"); Mov (edx, x)]
+              ) 
+        | CONST z     -> let s, env = env#allocate in
+            env, [Mov (L z, s)]
+        | READ        -> let s, env = (env#allocate) in
+            env, [Call "Lread"; Mov (eax, s)]
+        | WRITE       -> let s, env = (env#pop) in
+            env, [Push s; Call "Lwrite"; Pop eax]
+        | LD x        -> let s, env = (env#global x)#allocate in
+            env, 
+            (if is_register s 
+             then [Mov (env#loc x, s)]
+             else [Mov (env#loc x, eax); Mov (eax, s)]
+            )
+        | ST x        -> let s, env = (env#global x)#pop in
+            env, 
+            (if is_register s
+             then [Mov (s, env#loc x)]
+             else [Mov(s, eax); Mov (eax, env#loc x)] 
+            )
+        | LABEL l     -> env, [Label l]
+        | JMP l       -> env, [Jmp l]
+        | CJMP (x, l) -> let s, env = env#pop 
+          in env, [Binop ("cmp", L 0, s); CJmp (x, l)]
+        | BEGIN (name, args, locs) -> let env = env#enter name args locs 
+          in env, [Push ebp; Mov (esp, ebp); Binop ("-", M ("$" ^ (env#lsize)), esp)]
+        | END    -> env, [Label (env#epilogue); Mov (ebp, esp); Pop ebp; Ret; Meta (Printf.sprintf "\t.set %s, %d" env#lsize (4 * env#allocated))]
+        | RET fl -> if fl 
+                    then let s, env = env#pop in env, [Mov (s, eax); Jmp (env#epilogue)]
+                    else env, [Jmp (env#epilogue)]
+        | CALL (name, len, fl)     -> let rec get_push_args env len = (match len with
+                                        | 0   -> env, []
+                                        | len -> let x, env = env#pop in 
+                                                 let env, push_args = get_push_args env (len - 1) in
+                                                 env, (Push x)::push_args)
+                                   in let env, push_args = get_push_args env len 
+                                   in let return_value, env' = if fl 
+                                                              then let s, env = env#allocate in [Mov (eax, s)], env
+                                                              else [], env
+                                   in env', (List.fold_right (fun a xs -> (Push a)::xs) env#live_registers []) @
+                                           (List.rev push_args) @
+                                           [Call name; Binop ("+", L (4 * len), esp)] @
+                                           return_value @
+                                           (List.fold_left (fun xs a -> (Pop a)::xs) [] env#live_registers)
+      )
+  in let env, instrs = compile env ps 
+    in env, instr @ instrs 
+
                                 
 (* A set of strings *)           
 module S = Set.Make (String)

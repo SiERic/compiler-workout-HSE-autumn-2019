@@ -111,7 +111,7 @@ let rec compile_stmt t l_end = match t with
                               let l_quit  = label_generator#get_label in
                                 [LABEL l_start] @ compile_expr e @ [CJMP ("z", l_quit)] @ 
                                 compile_stmt s ""  @ [JMP l_start]  @ [LABEL l_quit]
-  | Stmt.Call (name, args) -> compile_expr (Expr.Call (name, args))
+  | Stmt.Call (name, args) -> List.fold_left (fun args' expr -> (compile_expr expr) @ args') [CALL (name, List.length args, false)] args
   | Stmt.Return e          -> (match e with
                                 | Some e -> compile_expr e @ [RET true]
                                 | None   -> [RET false])
@@ -121,4 +121,4 @@ let rec compile (ds, main) = let rec compile_defs ds = match ds with
                               | (d::ds) -> let (name, (args, locals, body)) = d 
                                            in [LABEL name] @ [BEGIN (name, args, locals)] @ compile_stmt body "" @ [END] @ compile_defs ds
                              in let l_main = label_generator#get_label
-                             in [JMP l_main] @ compile_defs ds @ [LABEL l_main] @ compile_stmt main "" @ [END] 
+                             in compile_stmt main "" @ [END] @ compile_defs ds
