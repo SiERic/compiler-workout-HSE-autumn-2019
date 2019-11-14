@@ -210,14 +210,19 @@ module Expr =
          primary);
 
       primary:
-        name:IDENT "(" args:!(Util.list0By)[ostap (",")][parse] ")" 
-                                     {Call (name, args)} 
+        a:brackets ".length" {Length a}
+      | brackets;
+
+      brackets: 
+        e:simple_expr es:(-"[" parse -"]")* {List.fold_left (fun a i -> Elem (a, i)) e es}
+      | simple_expr;
+
+      simple_expr:
+        name:IDENT "(" args:!(Util.list0)[parse] ")" {Call (name, args)} 
       | n:DECIMAL                    {Const n}
       | c:CHAR                       {Const (Char.code c)}
       | "[" a:!(Util.list parse) "]" {Array a}
       | s:STRING                     {String (String.sub s 1 (String.length s - 2))}
-      | a:parse "[" e:parse "]"      {Elem (a, e)}
-      | a:parse ".length"            {Length a}
       | x:IDENT                      {Var x}
       | -"(" parse -")"
     )
@@ -284,11 +289,7 @@ module Stmt =
     ostap (
       expr: !(Expr.parse);
 
-      assign:  x:IDENT is:!(indexes) ":=" e:expr        {Assign (x, is, e)};
-
-      indexes:
-          "[" i:expr "]" is:indexes {i::is}
-        | empty                     {[]};
+      assign:  x:IDENT is:(-"[" expr -"]")* ":=" e:expr {Assign (x, is, e)};
 
       skip:    "skip"                                   {Skip};
       if_stmt: "if" e:expr "then" s1:stmt s2:else_stmt  {If (e, s1, s2)};
