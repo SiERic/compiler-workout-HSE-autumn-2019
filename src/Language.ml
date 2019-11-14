@@ -214,11 +214,11 @@ module Expr =
       | c:CHAR                       {Const (Char.code c)}
       | "[" a:!(Util.list parse) "]" {Array a}
       | s:STRING                     {String (String.sub s 1 (String.length s - 2))}
+      | name:IDENT "(" args:!(Util.list0By)[ostap (",")][parse] ")" 
+                                     {Call (name, args)} 
       | x:IDENT                      {Var x}
       | a:parse "[" e:parse "]"      {Elem (a, e)}
       | a:parse ".length"            {Length a}
-      | name:IDENT "(" args:!(Util.list0By)[ostap (",")][parse] ")" 
-                                     {Call (name, args)} 
       | -"(" parse -")"
     )
     
