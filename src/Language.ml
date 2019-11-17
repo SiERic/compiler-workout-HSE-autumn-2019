@@ -209,12 +209,9 @@ module Expr =
          )
          primary);
 
-      primary:
-        a:brackets ".length" {Length a}
-      | brackets;
-
-      brackets: 
-        e:simple_expr es:(-"[" parse -"]")* {List.fold_left (fun a i -> Elem (a, i)) e es}
+      primary: 
+        a:(e:simple_expr es:(-"[" parse -"]")* {List.fold_left (fun a i -> Elem (a, i)) e es})
+          l:("." %"length")? {match l with None -> a | Some _ -> Length a}
       | simple_expr;
 
       simple_expr:
