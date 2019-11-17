@@ -220,11 +220,11 @@ module Expr =
       simple_expr:
         name:IDENT "(" args:!(Util.list0)[parse] ")" {Call (name, args)} 
       | n:DECIMAL                    {Const n}
+      | -"(" parse -")"
       | c:CHAR                       {Const (Char.code c)}
       | "[" a:!(Util.list parse) "]" {Array a}
       | s:STRING                     {String (String.sub s 1 (String.length s - 2))}
       | x:IDENT                      {Var x}
-      | -"(" parse -")"
     )
     
   end
