@@ -49,7 +49,49 @@ let split n l =
   in
   unzip ([], l) n
           
-  let rec eval _ = failwith "Not implemented yet"
+  let rec eval env conf prg = match prg with
+  | []      -> conf
+  | (p::ps) -> match p, conf with 
+    | BINOP op, (cs, y::x::st, c)                 -> eval env (cs, (Value.of_int (Expr.to_func op (Value.to_int x) (Value.to_int y)))::st, c) ps
+    | CONST z, (cs, st, c)                        -> eval env (cs, (Value.of_int z)::st, c) ps
+    | STRING s, (cs, st, c)                       -> eval env (cs, (Value.of_string s)::st, c) ps
+    | SEXP (x, n), (cs, st, c)                    -> let (ps', st') = split n st in 
+                                                     eval env (cs, (Value.of_sexp x (List.rev ps'))::st', c) ps
+    | LD x, (cs, st, (s, i, o))                   -> eval env (cs, (State.eval s x)::st, (s, i, o)) ps
+    | ST x, (cs, z::st, (s, i, o))                -> eval env (cs, st, ((State.update x z s), i, o)) ps
+    | STA (a, n), (cs, st, (s, i, o))             -> let (z::args, st') = split (n + 1) st in
+                                                     eval env (cs, st', (Stmt.update s a z (List.rev args), i, o)) ps
+    | LABEL l, conf                               -> eval env conf ps
+    | JMP l, conf                                 -> eval env conf (env#labeled l)
+    | CJMP (x, l), (cs, z::st, c)                 -> if ((x = "z") = ((Value.to_int z) = 0)) 
+                                                     then eval env (cs, st, c) (env#labeled l)
+                                                     else eval env (cs, st, c) ps
+    | BEGIN (_, args, locs), (cs, st, (s, i, o))  -> let rec add_val s1 al vl = 
+                                                     (match al, vl with
+                                                      | (x :: xs), (y :: ys) -> add_val (State.update x y s1) xs ys
+                                                      | [], ys               -> (s1, ys)
+                                                     ) in
+                                                     let s', st' = add_val (State.enter s (args @ locs)) (List.rev args) st in
+                                                     eval env (cs, st', (s', i, o)) ps
+    | END, (cs, st, (s, i, o))                    -> (match cs with
+                                                      | []            -> (cs, st, (s, i, o))
+                                                      | (p', s')::cs' -> eval env (cs', st, (State.leave s s', i, o)) p')
+    | CALL (f, n, p), (cs, st, (s, i, o))         -> if (env#is_label f) 
+                                                     then eval env ((ps, s)::cs, st, (s, i, o)) (env#labeled f) 
+                                                     else eval env (env#builtin conf f n p) ps
+    | RET _, (cs, st, (s, i, o))                  -> (match cs with
+                                                      | []            -> (cs, st, (s, i, o))
+                                                      | (p', s')::cs' -> eval env (cs', st, (State.leave s s', i, o)) p')
+    | DROP, (cs, z::st', c)                       -> eval env (cs, st', c) ps
+    | DUP, (cs, z::st', c)                        -> eval env (cs, z::z::st', c) ps
+    | SWAP, (cs, x::y::st', c)                    -> eval env (cs, y::x::st', c) ps
+    | TAG t, (cs, z::st', c)                      -> let Value.Sexp (t', _) = z in 
+                                                     let tag = if t' = t then 1 else 0 in 
+                                                     eval env (cs, (Value.of_int tag)::st', c) ps
+    | ENTER vars, (cs, st, (s, i, o))             -> let vals, st' = split (List.length vars) st in
+                                                     let s' = List.fold_left2 (fun ast e var -> State.bind var e ast) State.undefined vals vars in 
+                                                     eval env (cs, st', (State.push s s' vars, i, o)) ps                                
+    | LEAVE, (cs, st, (s, i, o))                  -> eval env (cs, st, (State.drop s, i, o)) ps 
 
 (* Top-level evaluation
 
@@ -75,7 +117,7 @@ let run p i =
            let f = match f.[0] with 'L' -> String.sub f 1 (String.length f - 1) | _ -> f in
            let args, stack' = split n stack in
            let (st, i, o, r) = Language.Builtin.eval (st, i, o, None) (List.rev args) f in
-           let stack'' = if p then stack' else let Some r = r in r::stack' in
+           let stack'' = if (not p) then stack' else let Some r = r in r::stack' in
            (*Printf.printf "Builtin:\n";*)
            (cstack, stack'', (st, i, o))
        end
@@ -92,4 +134,73 @@ let run p i =
    Takes a program in the source language and returns an equivalent program for the
    stack machine
 *)
-let compile _ = failwith "Not implemented yet"
+let label_generator =
+  object
+    val mutable x = 0
+    method get_label = x <- x + 1; (Printf.sprintf "label%d" x)
+  end
+
+let rec compile_expr e = 
+  match e with
+    | Expr.Const n            -> [CONST n]
+    | Expr.Array a            -> List.flatten (List.map compile_expr a) @ [CALL (".array", List.length a, true)]
+    | Expr.String s           -> [STRING s]
+    | Expr.Sexp (x, ps)       -> List.flatten (List.map compile_expr ps) @ [SEXP (x, List.length ps)]
+    | Expr.Var x              -> [LD x]
+    | Expr.Binop (op, e1, e2) -> compile_expr e1 @ compile_expr e2 @ [BINOP op]
+    | Expr.Elem (a, i)        -> compile_expr a @ compile_expr i @ [CALL (".elem", 2, true)]
+    | Expr.Length a           -> compile_expr a @ [CALL (".length", 1, true)]
+    | Expr.Call (name, args)  -> List.fold_left (fun s e -> (compile_expr e) @ s) [CALL ("L" ^ name, List.length args, true)] args
+
+let rec check_pattern p l_false inds = 
+  match p with 
+    | Stmt.Pattern.Wildcard     -> []
+    | Stmt.Pattern.Ident x      -> []
+    | Stmt.Pattern.Sexp (x, ps) ->
+        [DUP] @ List.flatten (List.map (fun x -> [CONST x; CALL (".elem", 2, true)]) inds) @ [DUP; TAG x; CJMP ("z", l_false); DROP] @
+        (let comp, _ = List.fold_left (fun (a, ind) p -> (a @ check_pattern p l_false (inds @ [ind]), ind + 1)) ([], 0) ps 
+        in comp)
+
+let rec compile_binding p inds = 
+  match p with
+    | Stmt.Pattern.Wildcard     -> []
+    | Stmt.Pattern.Ident x      -> [DUP] @ List.flatten (List.map (fun x -> [CONST x; CALL (".elem", 2, true)]) inds) @ [SWAP]
+    | Stmt.Pattern.Sexp (x, ps) -> let comp, _ = List.fold_left (fun (a, ind) p -> (a @ compile_binding p (inds @ [ind]), ind + 1)) ([], 0) ps in 
+        comp
+
+let rec compile_stmt s l_end = 
+  match s with 
+    | Stmt.Assign (x, [], e) -> compile_expr e @ [ST x]
+    | Stmt.Assign (x, es, e) -> List.flatten (List.map compile_expr (es @ [e])) @ [STA (x, List.length es)]
+    | Stmt.Seq (s1, s2)      -> compile_stmt s1 "" @ compile_stmt s2 l_end
+    | Stmt.Skip              -> []
+    | Stmt.If (e, s1, s2)    -> let l_else = label_generator#get_label in
+                                let l_quit = (if l_end = "" then label_generator#get_label else l_end) in             
+                                  compile_expr e @ [CJMP ("z", l_else)] @ compile_stmt s1 l_quit @ 
+                                  [JMP l_quit]   @ [LABEL l_else]       @ compile_stmt s2 l_quit @ (if l_end = "" then [LABEL l_quit] else [])
+    | Stmt.While (e, s)      -> let l_start = label_generator#get_label in
+                                let l_quit  = label_generator#get_label in
+                                  [LABEL l_start] @ compile_expr e @ [CJMP ("z", l_quit)] @ 
+                                  compile_stmt s ""  @ [JMP l_start]  @ [LABEL l_quit]
+    | Stmt.Call (name, args) -> List.fold_left (fun s e -> (compile_expr e) @ s) [CALL ("L" ^ name, List.length args, false)] args
+    | Stmt.Return e          -> (match e with
+                                  | Some e -> compile_expr e @ [RET true]
+                                  | None   -> [RET false])
+    | Stmt.Case (e, bs)      -> let rec find_branch l_quit bs = 
+                                  (match bs with 
+                                    | [] -> []
+                                    | b::bs' -> let (p, s) = b in 
+                                       let l_false = label_generator#get_label in
+                                       check_pattern p l_false [] @ compile_binding p [] @ [DROP] @ [ENTER (Stmt.Pattern.vars p)] @ compile_stmt s "" @ [LEAVE; JMP l_quit] @ (match p with Sexp _ -> [LABEL l_false; DROP] | _ -> []) @ find_branch l_quit bs')
+                                    in
+                                let l_quit = label_generator#get_label in
+                                compile_expr e @ find_branch l_quit bs @ [LABEL l_quit]
+
+let rec compile_defs ds = 
+  match ds with
+    | []      -> []
+    | (d::ds) -> let (name, (args, locals, body)) = d 
+                 in [LABEL ("L" ^ name)] @ [BEGIN (("L" ^ name), (List.rev args), locals)] @ compile_stmt body "" @ [END] @ compile_defs ds
+
+
+let rec compile (defs, p) = compile_stmt p "" @ [END] @ compile_defs defs 
