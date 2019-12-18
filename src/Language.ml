@@ -211,7 +211,7 @@ module Expr =
       match expr with
         | Const n            -> (st, i, o, Some (Value.of_int n))
         | Array xs           -> let (st', i', o', r') = eval_list env conf xs in 
-                                env#definition env ".array" r' (st', i', o', None)
+                                Builtin.eval (st', i', o', r') r' ".array"
         | String s           -> (st, i, o, Some (Value.of_string s))
         | Sexp (x, ps)       -> let (st', i', o', r') = eval_list env conf ps in 
                                 (st', i', o', Some (Value.Sexp (x, r')))
@@ -224,9 +224,9 @@ module Expr =
                                 Builtin.eval (st'', i'', o'', r'') [get r'; get r''] ".elem"
         | Length a           -> let (st', i', o', r') = eval env (st, i, o, r) a in
                                 Builtin.eval (st', i', o', r') [get r'] ".length"
-        | Call (name, exprs) -> let eval_expr = (fun expr (args, conf) ->
-                                                 let (st', i', o', r') = eval env conf expr in ((get r')::args, (st', i', o', r'))) in
-                                let args, conf = List.fold_right eval_expr exprs ([], conf) in
+        | Call (name, exprs) -> let args, conf = List.fold_right 
+                                (fun expr (args, conf) -> let (st', i', o', r') = eval env conf expr in ((get r')::args, (st', i', o', r'))) 
+                                exprs ([], conf) in
                                 env#definition env name args conf
       and eval_list env conf xs =
       let vs, (st, i, o, _) =

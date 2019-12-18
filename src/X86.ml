@@ -178,10 +178,9 @@ let rec compile env code =
                           else [Mov(s, eax); Mov (eax, env#loc x)] 
                          )
         | STA (x, n)  -> let s, env = (env#global x)#allocate in
-                         let push =
-                           match s with
-                           | S _ | M _ -> [Mov (env#loc x, eax); Mov (eax, s)]
-                           | _         -> [Mov (env#loc x, s)]
+                         let push = (if is_register s
+                                     then [Mov (env#loc x, s)]
+                                     else [Mov (env#loc x, eax); Mov (eax, s)])
                                in
                                let env, code = call env ".sta" (n + 2) true in
                                env, push @ code
