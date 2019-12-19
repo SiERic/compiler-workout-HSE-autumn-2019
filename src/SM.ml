@@ -143,12 +143,14 @@ let label_generator =
 let rec compile_expr e = 
   match e with
     | Expr.Const n            -> [CONST n]
+    | Expr.Dict d             -> List.flatten (List.map (fun (x, y) -> [CONST x; CONST y]) d) @ [SEXP ("_dict", 2 * (List.length d))] 
     | Expr.Array a            -> List.flatten (List.map compile_expr a) @ [CALL (".array", List.length a, true)]
     | Expr.String s           -> [STRING s]
     | Expr.Sexp (x, ps)       -> List.flatten (List.map compile_expr ps) @ [SEXP (x, List.length ps)]
     | Expr.Var x              -> [LD x]
     | Expr.Binop (op, e1, e2) -> compile_expr e1 @ compile_expr e2 @ [BINOP op]
-    | Expr.Elem (a, i)        -> compile_expr a @ compile_expr i @ [CALL (".elem", 2, true)]
+    | Expr.Elem (a, i)        -> 
+       compile_expr a @ compile_expr i @ [CALL (".elem", 2, true)]
     | Expr.Length a           -> compile_expr a @ [CALL (".length", 1, true)]
     | Expr.Call (name, args)  -> List.fold_left (fun s e -> (compile_expr e) @ s) [CALL ("L" ^ name, List.length args, true)] args
 

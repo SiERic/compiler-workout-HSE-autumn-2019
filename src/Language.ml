@@ -11,7 +11,7 @@ open Combinators
 module Value =
   struct
 
-    @type t = Int of int | String of bytes | Array of t array | Sexp of string * t list (*with show*)
+    @type t = Int of int | String of bytes | Array of t array | Sexp of string * t list | Dict of (int * int) list (*with show*)
 
     let to_int = function 
     | Int n -> n 
@@ -25,17 +25,30 @@ module Value =
     | Array a -> a
     | _       -> failwith "array value expected"
 
+
     let of_sexp s vs = Sexp (s, vs)
     let of_int     n = Int    n
     let of_string  s = String (Bytes.of_string s)
     let of_array   a = Array  a
+    let of_dict    d = Dict d
 
     let tag_of = function
     | Sexp (t, _) -> t
     | _ -> failwith "symbolic expression expected"
 
     let update_string s i x = Bytes.set s i x; s 
-    let update_array  a i x = a.(i) <- x; a                                          
+    let update_array  a i x = a.(i) <- x; a
+    let rec update_dict   d i x = match d with 
+      | [] -> [(i, x)]
+      | (key, value)::ds -> if (key = i) 
+                            then (key, x)::ds
+                            else (key, value)::(update_dict ds i x)
+
+    let rec dict_get d i = match d with 
+      | [] -> failwith "Unknown dict key"
+      | (key, value)::ds -> if (key = i) 
+                            then value
+                            else dict_get ds i
 
     let string_val v =
       let buf      = Buffer.create 128 in
@@ -127,7 +140,12 @@ module Builtin =
                                Some (match b with
                                      | Value.String   s  -> Value.of_int @@ Char.code (Bytes.get s i)
                                      | Value.Array    a  -> a.(i)
-                                     | Value.Sexp (_, a) -> List.nth a i
+                                     | Value.Sexp (tag, a) -> if (tag = "_dict")
+                                                              then let rec kek xs = (match xs with 
+                                                                | [] -> []
+                                                                | x::y::xs -> (x, y)::(kek xs))
+                                                                in Value.dict_get (kek a) j  
+                                                              else List.nth a i
                                )
                     )         
     | ".length"     -> (st, i, o, Some (Value.of_int (match List.hd args with Value.Sexp (_, a) -> List.length a | Value.Array a -> Array.length a | Value.String s -> Bytes.length s)))
@@ -155,6 +173,7 @@ module Expr =
     (* element extraction *) | Elem      of t * t
     (* length             *) | Length    of t
     (* string conversion  *) | StringVal of t
+                             | Dict      of (int * int) list
     (* function call      *) | Call      of string * t list with show
 
     (* Available binary operators:
@@ -212,6 +231,7 @@ module Expr =
         | Const n            -> (st, i, o, Some (Value.of_int n))
         | Array xs           -> let (st', i', o', r') = eval_list env conf xs in 
                                 Builtin.eval (st', i', o', r') r' ".array"
+        | Dict d             -> (st, i, o, Some (Value.of_dict d))
         | String s           -> (st, i, o, Some (Value.of_string s))
         | Sexp (x, ps)       -> let (st', i', o', r') = eval_list env conf ps in 
                                 (st', i', o', Some (Value.Sexp (x, r')))
@@ -221,7 +241,9 @@ module Expr =
                                 (st'', i'', o'', Some (Value.of_int (to_func op (Value.to_int (get r')) (Value.to_int (get r'')))))
         | Elem (a, ind)      -> let (st', i', o', r') = eval env (st, i, o, r) a in 
                                 let (st'', i'', o'', r'') = eval env (st', i', o', r') ind in
-                                Builtin.eval (st'', i'', o'', r'') [get r'; get r''] ".elem"
+                                (match r' with 
+                                  | Some (Dict d) -> (st'', i'', o'', Some (Value.of_int (Value.dict_get d (Value.to_int (get r'')))))
+                                  | _      -> Builtin.eval (st'', i'', o'', r'') [get r'; get r''] ".elem")
         | Length a           -> let (st', i', o', r') = eval env (st, i, o, r) a in
                                 Builtin.eval (st', i', o', r') [get r'] ".length"
         | Call (name, exprs) -> let args, conf = List.fold_right 
@@ -267,11 +289,14 @@ module Expr =
           l:("." %"length")? {match l with None -> a | Some _ -> Length a}
       | simple_expr;
 
+      dict_elem: key:DECIMAL ":" value:DECIMAL {(key, value)};
+
       simple_expr:
         name:IDENT "(" args:!(Util.list0)[parse] ")" {Call (name, args)} 
       | n:DECIMAL                    {Const n}
       | -"(" parse -")"
       | c:CHAR                       {Const (Char.code c)}
+      | "{" dict:!(Util.listBy)[ostap (";")][dict_elem] "}" {Dict dict}
       | "[" a:!(Util.list parse) "]" {Array a}
       | s:STRING                     {String (String.sub s 1 (String.length s - 2))}
       | x:IDENT                      {Var x}
@@ -335,6 +360,13 @@ module Stmt =
           (match a with
            | Value.String s when tl = [] -> Value.String (Value.update_string s i (Char.chr @@ Value.to_int v))
            | Value.Array a               -> Value.Array  (Value.update_array  a i (update a.(i) v tl))
+           | Value.Dict d                -> Value.Dict   (Value.update_dict d i (Value.to_int v))
+           | Value.Sexp (tag, a)         -> if (tag = "_dict") 
+                                            then let rec kek xs = (match xs with 
+                                                                | [] -> []
+                                                                | x::y::xs -> (Value.to_int x, Value.to_int y)::(kek xs))
+                                                 in Value.Sexp ("_dict", List.flatten (List.map (fun (x, y) -> [Value.of_int x; Value.of_int y]) (Value.update_dict (kek a) i (Value.to_int v)))) 
+                                            else failwith "keks" 
           ) 
       in
       State.update x (match is with [] -> v | _ -> update (State.eval st x) v is) st
